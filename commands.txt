@@ -1,0 +1,9 @@
+Postgres check:
+Get-Service *postgres*
+
+Backend python virtual environment:
+.\venv\Scripts\Activate.ps1
+uvicorn main:app --reload
+
+frontend react:
+npm run dev
