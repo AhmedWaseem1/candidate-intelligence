@@ -1,14 +1,22 @@
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
+import os
+import shutil
+import shutil
+from pathlib import Path
 from database import Base, engine, get_db
-from models import Job as JobModel
+from models import Candidate, Job as JobModel
 from schemas import JobCreate
 
 
 app = FastAPI()  # The application object receives and routes HTTP requests.
 
+# `uploads/` is the folder where resume files are saved on the server.
+# `exist_ok=True` prevents an error if the folder already exists.
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 # Create tables from the registered SQLAlchemy models on startup.
 Base.metadata.create_all(bind=engine)
@@ -103,4 +111,44 @@ def update_job(
     return {
         "message": "Job updated successfully",
         "job": db_job,
+    }
+
+@app.post("/candidates")
+def upload_candidate(
+    # `Form(...)` means the fields are submitted as form-data, not JSON.
+    # This lets the browser send text fields and a file together in one request.
+    name: str = Form(...),
+    email: str | None = Form(None),
+    resume: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Receive a candidate's name, optional email, and uploaded resume file.
+
+    The resume is saved to disk and a database row is created so the candidate can
+    be tracked later for analysis.
+    """
+
+    # Build the full storage path for the uploaded file.
+    file_path = UPLOAD_DIR / resume.filename
+
+    # Copy the uploaded file stream into a new file on the server.
+    # `wb` means write in binary mode, which is required for PDFs/docx/etc.
+    with file_path.open("wb") as buffer:
+        shutil.copyfileobj(resume.file, buffer)
+
+    # Create a database row matching the uploaded candidate details.
+    candidate = Candidate(
+        name=name,
+        email=email,
+        resume_filename=resume.filename,
+        resume_path=str(file_path),
+    )
+
+    db.add(candidate)  # Stage the new candidate row in the transaction.
+    db.commit()  # Save the row permanently in PostgreSQL.
+    db.refresh(candidate)  # Load database-generated fields like id/created_at.
+
+    return {
+        "message": "Candidate uploaded successfully",
+        "candidate": candidate,
     }

@@ -1,6 +1,6 @@
 # Candidate Intelligence
 
-Candidate Intelligence is a small full-stack application for creating and reviewing job postings. The frontend is built with React and Vite, and the backend is a FastAPI service backed by PostgreSQL and SQLAlchemy.
+Candidate Intelligence is a full-stack application for managing job postings and storing candidate resume uploads. The frontend is built with React and Vite, and the backend is a FastAPI service backed by PostgreSQL and SQLAlchemy.
 
 ## Current scope
 
@@ -10,9 +10,11 @@ The application currently supports:
 - Listing all saved jobs
 - Updating a job
 - Deleting a job
+- Uploading a candidate resume along with their name and optional email
+- Saving the uploaded file to the local `uploads/` folder and storing metadata in PostgreSQL
 - Checking backend availability through a health endpoint
 
-Resume upload and candidate analysis are not implemented yet.
+Resume parsing and candidate analysis are not implemented yet.
 
 ## Project structure
 
@@ -20,9 +22,10 @@ Resume upload and candidate analysis are not implemented yet.
 candidate-intelligence/
 ├── backend/
 │   ├── database.py    # Database connection and session dependency
-│   ├── main.py        # FastAPI app and job endpoints
-│   ├── models.py      # SQLAlchemy database models
-│   └── schemas.py     # Pydantic request schemas
+│   ├── main.py        # FastAPI app, job routes, and resume upload route
+│   ├── models.py      # SQLAlchemy database models for jobs and candidates
+│   ├── schemas.py     # Pydantic request schemas
+│   └── uploads/       # Saved candidate resumes (created at runtime)
 ├── frontend/
 │   ├── src/App.jsx    # React job-management interface
 │   └── package.json   # Frontend scripts and dependencies
@@ -111,15 +114,18 @@ Open the Vite URL shown in the terminal, normally `http://localhost:5173`.
 
 The frontend calls the backend at `http://127.0.0.1:8000`. The backend CORS configuration currently allows requests from `http://localhost:5173`.
 
+The backend also creates an `uploads/` directory automatically when the first resume is uploaded. Uploaded files are saved to disk and their metadata is stored in the `candidates` table.
+
 ## How the application works
 
-The application has three layers:
+The application has four main concerns:
 
 1. **React frontend:** `frontend/src/App.jsx` stores the form values and current job list in React state. When the page opens, it sends `GET /jobs`. When the form is submitted, it sends `POST /jobs`, clears the form, and fetches the updated list.
 2. **FastAPI backend:** `backend/main.py` receives HTTP requests, validates request bodies with `JobCreate`, and uses a database session for each operation.
-3. **PostgreSQL database:** `backend/models.py` maps the `Job` Python class to the `jobs` table. SQLAlchemy reads the connection string and creates the table when the API starts.
+3. **Resume upload flow:** `POST /candidates` accepts a candidate name, optional email, and uploaded file. The file is saved to `backend/uploads/`, and metadata is saved in the `candidates` table.
+4. **PostgreSQL database:** `backend/models.py` maps the `Job` and `Candidate` Python classes to the `jobs` and `candidates` tables. SQLAlchemy reads the connection string and creates the tables when the API starts.
 
-The normal create flow is:
+The normal job create flow is:
 
 ```text
 User fills form
@@ -139,6 +145,17 @@ The `jobs` table currently contains:
 | `id` | Integer | Auto-generated primary key |
 | `title` | String | Required job title |
 | `description` | Text | Required job description |
+| `created_at` | Timestamp | Set by PostgreSQL when the row is created |
+
+The `candidates` table contains:
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | Integer | Auto-generated primary key |
+| `name` | String | Candidate name (required) |
+| `email` | String | Candidate email (optional) |
+| `resume_filename` | String | Original uploaded file name |
+| `resume_path` | String | Server path where the resume was saved |
 | `created_at` | Timestamp | Set by PostgreSQL when the row is created |
 
 There is no migration system yet. During early development, adding a new column to `models.py` does not update an existing table automatically. For schema changes, use a migration tool such as Alembic or recreate the development table only when existing data can be discarded.
@@ -161,8 +178,9 @@ All job request bodies use JSON with the following fields:
 | `GET` | `/jobs` | Returns all jobs |
 | `PUT` | `/jobs/{job_id}` | Replaces a job's title and description |
 | `DELETE` | `/jobs/{job_id}` | Deletes a job |
+| `POST` | `/candidates` | Uploads a candidate resume with `name`, optional `email`, and a file |
 
-Example request:
+Example job request:
 
 ```powershell
 Invoke-RestMethod `
@@ -174,7 +192,16 @@ Invoke-RestMethod `
 
 Updating or deleting a missing job returns HTTP `404` with `Job not found`.
 
-The current React screen displays jobs and creates new ones. The update and delete endpoints exist in the backend but do not yet have controls in the frontend.
+Example candidate upload request using `curl`:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/candidates" \
+  -F "name=John Doe" \
+  -F "email=john@example.com" \
+  -F "resume=@/path/to/resume.pdf"
+```
+
+The current React screen displays jobs and creates new ones. The update and delete endpoints exist in the backend but do not yet have controls in the frontend. The candidate upload API is implemented in the backend, but its form UI is not yet connected in the React app.
 
 ## Where to make changes
 
@@ -184,6 +211,7 @@ The current React screen displays jobs and creates new ones. The update and dele
 - Change request validation in `backend/schemas.py`.
 - Change the page, form, or API calls in `frontend/src/App.jsx`.
 - Change visual styling in `frontend/src/App.css` and `frontend/src/index.css`.
+- Add new upload handling or candidate fields in the `POST /candidates` endpoint in `backend/main.py`.
 
 When adding a new job field, update the model, schema, frontend request object, form state, and database schema or migration together. Otherwise the API and UI can disagree about the shape of a job.
 
@@ -212,5 +240,7 @@ npm run preview  # Preview the production build locally
 
 - The backend uses SQLAlchemy sessions per request and closes each session after the request completes.
 - The `jobs` table is defined by `backend/models.py` with `id`, `title`, `description`, and `created_at` columns.
+- The `candidates` table stores uploaded candidate metadata, and the actual resume file is saved under `backend/uploads/`.
 - There are currently no automated backend tests or database migrations in the repository.
 - The frontend currently uses a hard-coded backend URL; a future deployment should move it to an environment variable.
+- The project currently supports file upload at the API level, but the frontend does not yet submit resume uploads from the browser.

@@ -16,3 +16,26 @@ class Job(Base):
     description = Column(Text, nullable=False)
     # PostgreSQL assigns the creation time when the row is inserted.
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# This model represents one applicant whose resume was uploaded for analysis.
+# SQLAlchemy converts each class attribute into a database column.
+class Candidate(Base):
+    # The table name in PostgreSQL is lowercase and plural, matching the model purpose.
+    __tablename__ = "candidates"
+    # `id` is the primary key: every row gets a unique integer identifier.
+    # `primary_key=True` means this column uniquely identifies each candidate.
+    # `index=True` makes lookups by id faster.
+    id = Column(Integer, primary_key=True, index=True)
+    # `name` is required because every candidate should have a name for display/reporting.
+    name = Column(String, nullable=False)
+    # `email` is optional; some uploads may not include an email or it may be unknown.
+    email = Column(String, nullable=True)
+    # `resume_filename` stores the original uploaded file name, such as "john_doe.pdf".
+    resume_filename = Column(String, nullable=False)
+    # `resume_path` stores where the uploaded file was saved on disk.
+    # This is usually a server path like a folder + file name.
+    resume_path = Column(String, nullable=False)
+    # PostgreSQL fills this automatically when a row is inserted.
+    # `server_default=func.now()` means "use the database's current timestamp".
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
