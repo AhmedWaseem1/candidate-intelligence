@@ -8,10 +8,13 @@ function App() {
   const [jobDescription, setJobDescription] = useState("");
   const [jobs, setJobs] = useState([]); // Jobs loaded from the backend.
 
-  // These state values store the candidate form data.
+  // These state values store the candidate form data for the resume upload form.
   const [candidateName, setCandidateName] = useState("");
   const [candidateEmail, setCandidateEmail] = useState("");
-  const [resume, setResume] = useState(null); // The selected resume file.
+  const [resume, setResume] = useState(null); // Holds the selected resume file object.
+
+  // Store all uploaded candidates fetched from the backend.
+  const [candidates, setCandidates] = useState([]);
 
   // `fetch` returns a promise, so this function waits for the HTTP response
   // and then converts the JSON response into data React can render.
@@ -32,9 +35,25 @@ function App() {
     }
   };
 
+  // Fetch all saved candidates so the page can display them after upload.
+  const fetchCandidates = async () => {
+    try {
+      const response = await fetch("http://127.0.0.1:8000/candidates");
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch candidates");
+      }
+
+      const data = await response.json();
+      setCandidates(data); // Store the API response in component state.
+    } catch (error) {
+      console.error("Error fetching candidates:", error);
+    }
+  };
   // An empty dependency array means this runs once after the first render.
   useEffect(() => {
     fetchJobs();
+    fetchCandidates();
   }, []);
 
   // Stop the browser's normal form submission, which would reload the page.
@@ -75,30 +94,30 @@ function App() {
     }
   };
 
-  // Handle submitting the candidate upload form.
+  // Handle the candidate upload form submission.
   const handleCandidateSubmit = async (e) => {
-    // Prevent the browser from refreshing the page after form submission.
+    // `e.preventDefault()` stops the browser from submitting the form normally,
+    // which would refresh the page and lose the uploaded file state.
     e.preventDefault();
 
-    // A resume must be selected before we send the request.
+    // A file must be selected before we can send the request.
     if (!resume) {
       alert("Please select a resume");
       return;
     }
 
-    // FormData is used when sending files through an HTTP request.
-    // It can contain both normal text fields and the actual file.
+    // `FormData` is the browser API for sending multipart form requests.
+    // It can include both string fields and binary file content in the same request.
     const formData = new FormData();
 
-    // These field names must match the parameters expected by FastAPI.
+    // These keys must exactly match the parameter names in the FastAPI route.
     formData.append("name", candidateName);
     formData.append("email", candidateEmail);
     formData.append("resume", resume);
 
     try {
-      // Send the candidate data and resume to the backend.
-      // We do not manually set Content-Type because the browser
-      // automatically creates the correct multipart/form-data header.
+      // We do not set `Content-Type` manually because the browser creates the required
+      // `multipart/form-data` boundary automatically for FormData requests.
       const response = await fetch("http://127.0.0.1:8000/candidates", {
         method: "POST",
         body: formData,
@@ -108,17 +127,18 @@ function App() {
         throw new Error("Failed to upload candidate");
       }
 
-      const data = await response.json(); // Read the API response.
+      const data = await response.json(); // Read the JSON response from the backend.
 
       console.log(data);
       alert("Candidate uploaded successfully!");
 
-      // Clear the React state after a successful upload.
+      // Clear the controlled inputs after a successful upload.
       setCandidateName("");
       setCandidateEmail("");
       setResume(null);
+      fetchCandidates();
 
-      // Reset the form so the selected file is also cleared visually.
+      // Reset the file input so the browser clears the selected file visually.
       e.target.reset();
     } catch (error) {
       console.error("Error uploading candidate:", error);
@@ -212,9 +232,8 @@ function App() {
             type="file"
             accept=".pdf,.doc,.docx"
             /*
-             * File inputs are slightly different from normal inputs.
-             * The selected file is available through e.target.files.
-             * We store the first selected file in React state.
+             * File inputs are special because they expose the chosen file through
+             * the browser's `files` array. We store the first selected file here.
              */
             onChange={(e) => setResume(e.target.files[0])}
             required
@@ -223,6 +242,34 @@ function App() {
 
         <button type="submit">Upload Candidate</button>
       </form>
+      <hr />
+
+      <h2>Uploaded Candidates</h2>
+
+      {candidates.length === 0 ? (
+        <p>No candidates found.</p>
+      ) : (
+        <div>
+          {/* map() creates one card per candidate received from the backend. */}
+          {candidates.map((candidate) => (
+            <div key={candidate.id}>
+              <h3>{candidate.name}</h3>
+
+              <p>
+                Email: {candidate.email || "Not provided"}
+              </p>
+
+              <p>
+                Resume: {candidate.resume_filename}
+              </p>
+
+              <small>
+                Uploaded: {new Date(candidate.created_at).toLocaleString()}
+              </small>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

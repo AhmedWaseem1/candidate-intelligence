@@ -115,28 +115,29 @@ def update_job(
 
 @app.post("/candidates")
 def upload_candidate(
-    # `Form(...)` means the fields are submitted as form-data, not JSON.
-    # This lets the browser send text fields and a file together in one request.
+    # `Form(...)` means the browser sends these as form fields instead of JSON.
+    # This is important because a file upload request is not plain JSON.
     name: str = Form(...),
     email: str | None = Form(None),
     resume: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """Receive a candidate's name, optional email, and uploaded resume file.
+    """Save a resume file to disk and store the candidate record in PostgreSQL.
 
-    The resume is saved to disk and a database row is created so the candidate can
-    be tracked later for analysis.
+    The frontend sends a multipart form: text fields + binary file. FastAPI splits
+    this into separate values and gives us them as function arguments.
     """
 
-    # Build the full storage path for the uploaded file.
+    # `resume.filename` is the original file name uploaded by the browser.
+    # We place it inside the uploads folder so we keep the file on the server.
     file_path = UPLOAD_DIR / resume.filename
 
-    # Copy the uploaded file stream into a new file on the server.
-    # `wb` means write in binary mode, which is required for PDFs/docx/etc.
+    # `copyfileobj` copies the binary file content from the request stream into the disk file.
+    # `wb` means "write bytes" because resumes are binary files, not plain text.
     with file_path.open("wb") as buffer:
         shutil.copyfileobj(resume.file, buffer)
 
-    # Create a database row matching the uploaded candidate details.
+    # Create a Candidate model instance using the submitted form values.
     candidate = Candidate(
         name=name,
         email=email,
@@ -144,11 +145,20 @@ def upload_candidate(
         resume_path=str(file_path),
     )
 
-    db.add(candidate)  # Stage the new candidate row in the transaction.
-    db.commit()  # Save the row permanently in PostgreSQL.
-    db.refresh(candidate)  # Load database-generated fields like id/created_at.
+    db.add(candidate)  # Add the row to the current SQLAlchemy transaction.
+    db.commit()  # Save the new row permanently in PostgreSQL.
+    db.refresh(candidate)  # Read back the database-generated values like id and created_at.
 
     return {
         "message": "Candidate uploaded successfully",
         "candidate": candidate,
     }
+
+
+@app.get("/candidates")
+def get_candidates(db: Session = Depends(get_db)):
+    """Return all candidate rows saved in the database."""
+
+    # `.query(Candidate).all()` executes a SELECT * FROM candidates query.
+    candidates = db.query(Candidate).all()
+    return candidates
