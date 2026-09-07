@@ -36,6 +36,9 @@ class Candidate(Base):
     # `resume_path` stores where the uploaded file was saved on disk.
     # This is usually a server path like a folder + file name.
     resume_path = Column(String, nullable=False)
+    # `resume_text` stores text extracted from the uploaded PDF or DOCX file.
+    # It remains optional so a candidate row can represent an upload without parsed text.
+    resume_text = Column(Text, nullable=True)
     # PostgreSQL fills this automatically when a row is inserted.
     # `server_default=func.now()` means "use the database's current timestamp".
     created_at = Column(DateTime(timezone=True), server_default=func.now())

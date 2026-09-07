@@ -12,9 +12,11 @@ The application currently supports:
 - Deleting a job
 - Uploading a candidate resume along with their name and optional email
 - Saving the uploaded file to the local `uploads/` folder and storing metadata in PostgreSQL
+- Extracting text from uploaded PDF and DOCX resumes
+- Listing uploaded candidates and viewing their extracted resume text
 - Checking backend availability through a health endpoint
 
-Resume parsing and candidate analysis are not implemented yet.
+Candidate scoring and analysis are not implemented yet.
 
 ## Project structure
 
@@ -27,7 +29,7 @@ candidate-intelligence/
 │   ├── schemas.py     # Pydantic request schemas
 │   └── uploads/       # Saved candidate resumes (created at runtime)
 ├── frontend/
-│   ├── src/App.jsx    # React job-management interface
+│   ├── src/App.jsx    # React job and candidate-management interface
 │   └── package.json   # Frontend scripts and dependencies
 └── README.MD
 ```
@@ -122,8 +124,9 @@ The application has four main concerns:
 
 1. **React frontend:** `frontend/src/App.jsx` stores the form values and current job list in React state. When the page opens, it sends `GET /jobs`. When the form is submitted, it sends `POST /jobs`, clears the form, and fetches the updated list.
 2. **FastAPI backend:** `backend/main.py` receives HTTP requests, validates request bodies with `JobCreate`, and uses a database session for each operation.
-3. **Resume upload flow:** `POST /candidates` accepts a candidate name, optional email, and uploaded file. The file is saved to `backend/uploads/`, and metadata is saved in the `candidates` table.
-4. **PostgreSQL database:** `backend/models.py` maps the `Job` and `Candidate` Python classes to the `jobs` and `candidates` tables. SQLAlchemy reads the connection string and creates the tables when the API starts.
+3. **Resume upload flow:** `POST /candidates` accepts a candidate name, optional email, and a PDF or DOCX file. The file is saved to `backend/uploads/`, its text is extracted, and both metadata and extracted text are saved in the `candidates` table.
+4. **Candidate viewing flow:** The frontend loads the candidate list with `GET /candidates`. Clicking `View Resume` sends `GET /candidates/{candidate_id}`, then renders the returned details and extracted text in React state. This is an in-place fetch and does not reload or navigate the page.
+5. **PostgreSQL database:** `backend/models.py` maps the `Job` and `Candidate` Python classes to the `jobs` and `candidates` tables. SQLAlchemy reads the connection string and creates the tables when the API starts.
 
 The normal job create flow is:
 
@@ -179,6 +182,8 @@ All job request bodies use JSON with the following fields:
 | `PUT` | `/jobs/{job_id}` | Replaces a job's title and description |
 | `DELETE` | `/jobs/{job_id}` | Deletes a job |
 | `POST` | `/candidates` | Uploads a candidate resume with `name`, optional `email`, and a file |
+| `GET` | `/candidates` | Returns all uploaded candidates |
+| `GET` | `/candidates/{candidate_id}` | Returns one candidate, including extracted resume text |
 
 Example job request:
 
@@ -201,7 +206,7 @@ curl -X POST "http://127.0.0.1:8000/candidates" \
   -F "resume=@/path/to/resume.pdf"
 ```
 
-The current React screen displays jobs and creates new ones. The update and delete endpoints exist in the backend but do not yet have controls in the frontend. The candidate upload API is implemented in the backend, but its form UI is not yet connected in the React app.
+The React screen displays jobs, creates new ones, uploads candidates, and shows uploaded candidate details. The update and delete job endpoints exist in the backend but do not yet have controls in the frontend.
 
 ## Where to make changes
 

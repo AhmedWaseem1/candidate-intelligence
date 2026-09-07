@@ -16,6 +16,12 @@ function App() {
   // Store all uploaded candidates fetched from the backend.
   const [candidates, setCandidates] = useState([]);
 
+  // Stores the candidate whose resume details are currently being viewed.
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
+
+  // Tracks whether the detail request is in progress.
+  const [isLoadingCandidate, setIsLoadingCandidate] = useState(false);
+
   // `fetch` returns a promise, so this function waits for the HTTP response
   // and then converts the JSON response into data React can render.
   const fetchJobs = async () => {
@@ -48,6 +54,32 @@ function App() {
       setCandidates(data); // Store the API response in component state.
     } catch (error) {
       console.error("Error fetching candidates:", error);
+    }
+  };
+
+  // Fetch one candidate and display the complete candidate record.
+  const fetchCandidate = async (candidateId) => {
+    // This request updates the detail section in place; it does not navigate or reload the page.
+    setIsLoadingCandidate(true);
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/candidates/${candidateId}`
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch candidate");
+      }
+
+      const data = await response.json();
+
+      // Store the selected candidate so React can render its details.
+      setSelectedCandidate(data);
+    } catch (error) {
+      console.error("Error fetching candidate:", error);
+    } finally {
+      // This runs whether the request succeeds or fails.
+      setIsLoadingCandidate(false);
     }
   };
   // An empty dependency array means this runs once after the first render.
@@ -264,12 +296,63 @@ function App() {
               </p>
 
               <small>
-                Uploaded: {new Date(candidate.created_at).toLocaleString()}
+                Uploaded:{" "}
+                {new Date(candidate.created_at).toLocaleString()}
               </small>
+
+              <div>
+                <button
+                  type="button"
+                  // Fetch the full record only when the user asks to view it.
+                  onClick={() => fetchCandidate(candidate.id)}
+                >
+                  View Resume
+                </button>
+              </div>
             </div>
           ))}
         </div>
       )}
+      <hr />
+
+    {/* The detail panel is rendered from state and can be closed without another API request. */}
+<h2>Candidate Details</h2>
+
+{isLoadingCandidate ? (
+  <p>Loading candidate...</p>
+) : selectedCandidate === null ? (
+  <p>Select a candidate to view their resume.</p>
+) : (
+  <div className="candidate-details">
+    <h3>{selectedCandidate.name}</h3>
+
+    <p>
+      Email: {selectedCandidate.email || "Not provided"}
+    </p>
+
+    <p>
+      Resume: {selectedCandidate.resume_filename}
+    </p>
+
+    <small>
+      Uploaded:{" "}
+      {new Date(selectedCandidate.created_at).toLocaleString()}
+    </small>
+
+    <h4>Extracted Resume Text</h4>
+
+    <pre className="resume-text">
+      {selectedCandidate.resume_text || "No text was extracted."}
+    </pre>
+
+    <button
+      type="button"
+      onClick={() => setSelectedCandidate(null)}
+    >
+      Close Resume
+    </button>
+  </div>
+)}
     </div>
   );
 }

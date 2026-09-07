@@ -1,5 +1,6 @@
 Postgres check:
 Get-Service *postgres*
+psql -U postgres
 
 Backend python virtual environment:
 .\venv\Scripts\Activate.ps1

@@ -11,6 +11,33 @@ from models import Candidate, Job as JobModel
 from schemas import JobCreate
 
 
+from pypdf import PdfReader
+from docx import Document
+
+def extract_resume_text(file_path: Path) -> str:
+    """
+    Extract readable text from a PDF or DOCX resume.
+    """
+    extension = file_path.suffix.lower()
+
+    if extension == ".pdf":
+        reader = PdfReader(str(file_path))
+
+        return "\n".join(
+            page.extract_text() or ""
+            for page in reader.pages
+        )
+
+    if extension == ".docx":
+        document = Document(str(file_path))
+
+        return "\n".join(
+            paragraph.text
+            for paragraph in document.paragraphs
+        )
+
+    raise ValueError("Unsupported resume format")
+
 app = FastAPI()  # The application object receives and routes HTTP requests.
 
 # `uploads/` is the folder where resume files are saved on the server.
@@ -115,45 +142,59 @@ def update_job(
 
 @app.post("/candidates")
 def upload_candidate(
-    # `Form(...)` means the browser sends these as form fields instead of JSON.
-    # This is important because a file upload request is not plain JSON.
     name: str = Form(...),
     email: str | None = Form(None),
     resume: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """Save a resume file to disk and store the candidate record in PostgreSQL.
+    # Only allow the file types our extraction function supports.
+    allowed_extensions = {".pdf", ".docx"}
 
-    The frontend sends a multipart form: text fields + binary file. FastAPI splits
-    this into separate values and gives us them as function arguments.
-    """
+    extension = Path(resume.filename).suffix.lower()
 
-    # `resume.filename` is the original file name uploaded by the browser.
-    # We place it inside the uploads folder so we keep the file on the server.
+    if extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF and DOCX resumes are supported",
+        )
+
+    # Create a safe local path for the uploaded file.
     file_path = UPLOAD_DIR / resume.filename
 
-    # `copyfileobj` copies the binary file content from the request stream into the disk file.
-    # `wb` means "write bytes" because resumes are binary files, not plain text.
+    # Save the uploaded file to disk.
     with file_path.open("wb") as buffer:
         shutil.copyfileobj(resume.file, buffer)
 
-    # Create a Candidate model instance using the submitted form values.
+    try:
+        # Read the saved file and extract its text.
+        resume_text = extract_resume_text(file_path)
+    except Exception as error:
+        # Avoid saving an incomplete candidate record if extraction fails.
+        if file_path.exists():
+            file_path.unlink()
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not extract resume text: {error}",
+        )
+
+    # Create the database record, including the extracted text.
     candidate = Candidate(
         name=name,
         email=email,
         resume_filename=resume.filename,
         resume_path=str(file_path),
+        resume_text=resume_text,
     )
 
-    db.add(candidate)  # Add the row to the current SQLAlchemy transaction.
-    db.commit()  # Save the new row permanently in PostgreSQL.
-    db.refresh(candidate)  # Read back the database-generated values like id and created_at.
+    db.add(candidate)
+    db.commit()
+    db.refresh(candidate)
 
     return {
         "message": "Candidate uploaded successfully",
         "candidate": candidate,
     }
-
 
 @app.get("/candidates")
 def get_candidates(db: Session = Depends(get_db)):
@@ -162,3 +203,21 @@ def get_candidates(db: Session = Depends(get_db)):
     # `.query(Candidate).all()` executes a SELECT * FROM candidates query.
     candidates = db.query(Candidate).all()
     return candidates
+
+@app.get("/candidates/{candidate_id}")
+def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
+    """Return one candidate and its extracted resume text for the detail view."""
+
+    candidate = (
+        db.query(Candidate)
+        .filter(Candidate.id == candidate_id)
+        .first()
+    )
+
+    if candidate is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Candidate not found",
+        )
+
+    return candidate
