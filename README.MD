@@ -14,9 +14,10 @@ The application currently supports:
 - Saving the uploaded file to the local `uploads/` folder and storing metadata in PostgreSQL
 - Extracting text from uploaded PDF and DOCX resumes
 - Listing uploaded candidates and viewing their extracted resume text
+- Matching a candidate to a job by comparing extracted skills from the resume and job description
 - Checking backend availability through a health endpoint
 
-Candidate scoring and analysis are not implemented yet.
+The matching logic is a simple keyword-based prototype; it is not a full ATS or ML-based ranking model.
 
 ## Project structure
 
@@ -120,13 +121,14 @@ The backend also creates an `uploads/` directory automatically when the first re
 
 ## How the application works
 
-The application has four main concerns:
+The application has five main concerns:
 
 1. **React frontend:** `frontend/src/App.jsx` stores the form values and current job list in React state. When the page opens, it sends `GET /jobs`. When the form is submitted, it sends `POST /jobs`, clears the form, and fetches the updated list.
 2. **FastAPI backend:** `backend/main.py` receives HTTP requests, validates request bodies with `JobCreate`, and uses a database session for each operation.
 3. **Resume upload flow:** `POST /candidates` accepts a candidate name, optional email, and a PDF or DOCX file. The file is saved to `backend/uploads/`, its text is extracted, and both metadata and extracted text are saved in the `candidates` table.
 4. **Candidate viewing flow:** The frontend loads the candidate list with `GET /candidates`. Clicking `View Resume` sends `GET /candidates/{candidate_id}`, then renders the returned details and extracted text in React state. This is an in-place fetch and does not reload or navigate the page.
-5. **PostgreSQL database:** `backend/models.py` maps the `Job` and `Candidate` Python classes to the `jobs` and `candidates` tables. SQLAlchemy reads the connection string and creates the tables when the API starts.
+5. **Skill-matching flow:** `GET /jobs/{job_id}/candidates/{candidate_id}/match` compares the job description against extracted resume text and returns a percentage match, matched skills, and missing skills.
+6. **PostgreSQL database:** `backend/models.py` maps the `Job` and `Candidate` Python classes to the `jobs` and `candidates` tables. SQLAlchemy reads the connection string and creates the tables when the API starts.
 
 The normal job create flow is:
 
@@ -184,6 +186,7 @@ All job request bodies use JSON with the following fields:
 | `POST` | `/candidates` | Uploads a candidate resume with `name`, optional `email`, and a file |
 | `GET` | `/candidates` | Returns all uploaded candidates |
 | `GET` | `/candidates/{candidate_id}` | Returns one candidate, including extracted resume text |
+| `GET` | `/jobs/{job_id}/candidates/{candidate_id}/match` | Compares a job description to a candidate resume and returns a skill match summary |
 
 Example job request:
 
@@ -206,7 +209,7 @@ curl -X POST "http://127.0.0.1:8000/candidates" \
   -F "resume=@/path/to/resume.pdf"
 ```
 
-The React screen displays jobs, creates new ones, uploads candidates, and shows uploaded candidate details. The update and delete job endpoints exist in the backend but do not yet have controls in the frontend.
+The React screen displays jobs, creates new ones, uploads candidates, shows uploaded candidate details, and can trigger a candidate-to-job match evaluation. The update and delete job endpoints exist in the backend but do not yet have controls in the frontend.
 
 ## Where to make changes
 
@@ -248,4 +251,4 @@ npm run preview  # Preview the production build locally
 - The `candidates` table stores uploaded candidate metadata, and the actual resume file is saved under `backend/uploads/`.
 - There are currently no automated backend tests or database migrations in the repository.
 - The frontend currently uses a hard-coded backend URL; a future deployment should move it to an environment variable.
-- The project currently supports file upload at the API level, but the frontend does not yet submit resume uploads from the browser.
+- The frontend already submits resume uploads and fetches candidate details in the browser; future work can add more polished match-score UI and stronger resume parsing.

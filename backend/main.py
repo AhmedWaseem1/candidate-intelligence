@@ -1,3 +1,4 @@
+import re
 from fastapi import Depends, FastAPI, HTTPException, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -14,6 +15,8 @@ from schemas import JobCreate
 from pypdf import PdfReader
 from docx import Document
 
+# Extract a plain-text version of the uploaded resume so it can be displayed
+# in the UI and checked against a job description for skill matching.
 def extract_resume_text(file_path: Path) -> str:
     """
     Extract readable text from a PDF or DOCX resume.
@@ -37,6 +40,65 @@ def extract_resume_text(file_path: Path) -> str:
         )
 
     raise ValueError("Unsupported resume format")
+
+# This lightweight keyword matcher looks for common technical skills inside the
+# extracted resume text or a job description. It is intentionally simple and
+# deterministic for the early prototype, rather than using a full NLP model.
+def extract_skills(text: str) -> set[str]:
+    """
+    Extract a small set of known technical skills from text.
+    """
+    known_skills = {
+        "python",
+        "javascript",
+        "typescript",
+        "react",
+        "next.js",
+        "node.js",
+        "express",
+        "fastapi",
+        "django",
+        "java",
+        "spring",
+        "c++",
+        "c#",
+        "html",
+        "css",
+        "tailwind",
+        "sql",
+        "postgresql",
+        "mysql",
+        "mongodb",
+        "redis",
+        "docker",
+        "kubernetes",
+        "aws",
+        "azure",
+        "git",
+        "github",
+        "rest",
+        "graphql",
+        "machine learning",
+        "deep learning",
+        "pandas",
+        "numpy",
+        "tensorflow",
+        "pytorch",
+        "figma",
+        "agile",
+        "scrum",
+    }
+
+    normalized_text = text.lower()
+    detected_skills = set()
+
+    for skill in known_skills:
+        pattern = r"\b" + re.escape(skill) + r"\b"
+
+        if re.search(pattern, normalized_text):
+            detected_skills.add(skill)
+
+    return detected_skills
 
 app = FastAPI()  # The application object receives and routes HTTP requests.
 
@@ -140,6 +202,8 @@ def update_job(
         "job": db_job,
     }
 
+# Upload a candidate resume, save the file to disk, parse the text, and store
+# both the metadata and extracted content in PostgreSQL for later viewing and matching.
 @app.post("/candidates")
 def upload_candidate(
     name: str = Form(...),
@@ -204,6 +268,8 @@ def get_candidates(db: Session = Depends(get_db)):
     candidates = db.query(Candidate).all()
     return candidates
 
+# Return a single uploaded candidate so the frontend can render the complete
+# resume metadata and extracted text in a detail panel.
 @app.get("/candidates/{candidate_id}")
 def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
     """Return one candidate and its extracted resume text for the detail view."""
@@ -221,3 +287,62 @@ def get_candidate(candidate_id: int, db: Session = Depends(get_db)):
         )
 
     return candidate
+# Compare a job description against a candidate's extracted resume text to
+# estimate how well the candidate matches the role. This is a simple prototype
+# skill-overlap score, not a production-grade ATS or ML ranking system.
+@app.get("/jobs/{job_id}/candidates/{candidate_id}/match")
+def match_candidate_to_job(
+    job_id: int,
+    candidate_id: int,
+    db: Session = Depends(get_db),
+):
+    job = (
+        db.query(JobModel)
+        .filter(JobModel.id == job_id)
+        .first()
+    )
+
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found",
+        )
+
+    candidate = (
+        db.query(Candidate)
+        .filter(Candidate.id == candidate_id)
+        .first()
+    )
+
+    if candidate is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Candidate not found",
+        )
+
+    job_skills = extract_skills(job.description)
+    candidate_skills = extract_skills(candidate.resume_text or "")
+
+    # Match the requested role against the candidate's extracted keywords and
+    # return both the overlap and any missing skills in a format suitable for UI display.
+    matched_skills = job_skills.intersection(candidate_skills)
+    missing_skills = job_skills.difference(candidate_skills)
+
+    if len(job_skills) == 0:
+        match_score = 0
+    else:
+        match_score = round(
+            (len(matched_skills) / len(job_skills)) * 100
+        )
+
+    return {
+        "job_id": job.id,
+        "candidate_id": candidate.id,
+        "job_title": job.title,
+        "candidate_name": candidate.name,
+        "match_score": match_score,
+        "job_skills": sorted(job_skills),
+        "candidate_skills": sorted(candidate_skills),
+        "matched_skills": sorted(matched_skills),
+        "missing_skills": sorted(missing_skills),
+    }
